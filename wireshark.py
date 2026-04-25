@@ -1,79 +1,80 @@
 import customtkinter as ctk
 from scapy.all import *
+from scapy.layers.dns import DNS, DNSQR
 import threading
-import socket
 
-class EliteSniffer(ctk.CTk):
+class SiteTrackerSniffer(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("⚡ Cyber-Spy Sniffer Pro")
-        self.geometry("1000x700")
+        self.title("🌐 Live Web Monitor & Sniffer")
+        self.geometry("900x700")
         ctk.set_appearance_mode("Dark")
 
-        # --- Sidebar Controls ---
-        self.sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
-        self.sidebar.pack(side="left", fill="y")
+        # --- Sidebar ---
+        self.sidebar = ctk.CTkFrame(self, width=200)
+        self.sidebar.pack(side="left", fill="y", padx=10, pady=10)
 
-        self.title_label = ctk.CTkLabel(self.sidebar, text="SNIFFER\nCOMMAND", font=("Orbitron", 20, "bold"))
-        self.title_label.pack(pady=20)
-
-        self.start_btn = ctk.CTkButton(self.sidebar, text="▶ START SCAN", fg_color="#27ae60", command=self.toggle_sniffing)
-        self.start_btn.pack(pady=10, padx=20)
-
-        self.clear_btn = ctk.CTkButton(self.sidebar, text="🗑 CLEAR LOGS", fg_color="#c0392b", command=self.clear_logs)
-        self.clear_btn.pack(pady=10, padx=20)
-
-        # --- Main Console ---
-        self.console = ctk.CTkTextbox(self, font=("Consolas", 13), text_color="#00FF00", fg_color="#1a1a1a")
-        self.console.pack(expand=True, fill="both", padx=20, pady=20)
-
-        self.is_sniffing = False
-
-    def log(self, text):
-        self.console.insert("end", f"{text}\n")
-        self.console.see("end")
-
-    def packet_handler(self, pkt):
-        if not self.is_sniffing: return
+        ctk.CTkLabel(self.sidebar, text="WEB MONITOR", font=("Arial", 20, "bold")).pack(pady=20)
         
-        try:
-            if pkt.haslayer(IP):
-                ip_layer = pkt.getlayer(IP)
-                protocol = pkt.summary().split("/")[0] # Basic Proto detect
-                
-                # Basic Decryption Logic: Yahan hum Raw data ko decode karte hain
-                payload = ""
-                if pkt.haslayer(Raw):
-                    raw_data = pkt[Raw].load
-                    try:
-                        # Hum bytes ko readable text mein convert karne ki koshish karte hain
-                        payload = f" | Data: {raw_data.decode('utf-8', errors='ignore')[:50]}"
-                    except:
-                        payload = " | Data: [Encrypted/Binary]"
+        self.start_btn = ctk.CTkButton(self.sidebar, text="▶ START MONITOR", fg_color="green", command=self.toggle_monitor)
+        self.start_btn.pack(pady=10, padx=10)
 
-                log_msg = f"[{protocol}] {ip_layer.src} ➔ {ip_layer.dst}{payload}"
-                self.log(log_msg)
-        except Exception as e:
-            pass
+        self.stop_btn = ctk.CTkButton(self.sidebar, text="⏹ STOP", fg_color="red", command=self.stop_monitor)
+        self.stop_btn.pack(pady=10, padx=10)
 
-    def start_sniff_thread(self):
-        sniff(prn=self.packet_handler, store=0, stop_filter=lambda x: not self.is_sniffing)
+        # --- Main View (Table/List Style) ---
+        self.log_box = ctk.CTkTextbox(self, font=("Consolas", 13), text_color="#00FF00")
+        self.log_box.pack(expand=True, fill="both", padx=20, pady=20)
 
-    def toggle_sniffing(self):
-        if not self.is_sniffing:
-            self.is_sniffing = True
-            self.start_btn.configure(text="⏹ STOP SCAN", fg_color="#e67e22")
-            self.log("[*] Initializing Network Tap... Capture Started.")
-            threading.Thread(target=self.start_sniff_thread, daemon=True).start()
-        else:
-            self.is_sniffing = False
-            self.start_btn.configure(text="▶ START SCAN", fg_color="#27ae60")
-            self.log("[!] Scan Interrupted.")
+        self.is_monitoring = False
+
+    def process_packet(self, pkt):
+        if not self.is_monitoring: return
+
+        # DNS Query detect karke website ka naam nikalna
+        if pkt.haslayer(DNS) and pkt.getlayer(DNS).qr == 0:
+            try:
+                # Website domain name extract karna
+                qname = pkt.getlayer(DNSQR).qname.decode("utf-8")
+                # Faltu sites filter karne ke liye (Optional)
+                if not any(x in qname for x in ["arpa", "local"]):
+                    log_msg = f"[VISITED] Site: {qname[:-1]} | Client: {pkt[IP].src}"
+                    self.log_to_gui(log_msg)
+            except:
+                pass
+
+        # HTTP Host header check (Unencrypted traffic ke liye)
+        elif pkt.haslayer(Raw):
+            try:
+                load = pkt[Raw].load.decode('utf-8', errors='ignore')
+                if "Host:" in load:
+                    host = load.split("Host: ")[1].split("\r\n")[0]
+                    self.log_to_gui(f"[HTTP] Host Found: {host}")
+            except:
+                pass
+
+    def log_to_gui(self, msg):
+        self.log_box.insert("end", f"{msg}\n")
+        self.log_box.see("end")
+
+    def run_sniffer(self):
+        # UDP port 53 (DNS) filter use kar rahe hain speed ke liye
+        sniff(filter="udp port 53 or port 80", prn=self.process_packet, store=0, stop_filter=lambda x: not self.is_monitoring)
+
+    def toggle_monitor(self):
+        if not self.is_monitoring:
+            self.is_monitoring = True
+            self.log_to_gui("[*] Monitoring started... Tracking web visits.")
+            threading.Thread(target=self.run_sniffer, daemon=True).start()
+
+    def stop_monitor(self):
+        self.is_monitoring = False
+        self.log_to_gui("[!] Monitoring stopped.")
 
     def clear_logs(self):
-        self.console.delete("1.0", "end")
+        self.log_box.delete("1.0", "end")
 
 if __name__ == "__main__":
-    app = EliteSniffer()
+    app = SiteTrackerSniffer()
     app.mainloop()
