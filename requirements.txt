@@ -1,0 +1,11 @@
+# GUI Framework
+customtkinter
+
+# Metasploit RPC Bridge
+pymetasploit3
+
+# Networking & API
+requests
+
+# Image Handling (Optional but recommended for CTK)
+Pillow
